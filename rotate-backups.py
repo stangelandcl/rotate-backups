@@ -114,9 +114,6 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 DEFAULTS = {
             'backups_dir':        '/var/backups/latest/',
             'archives_dir':       '/var/backups/archives/',
-            'hourly_backup_hour': 23, # 0-23
-            'weekly_backup_day':  6,  # 0-6, Monday-Sunday
-            'max_weekly_backups': 52,
             'backup_extensions':  ['tar.gz', '.tar.bz2', '.jar'], # list of file extensions that will be backed up
             'log_level':          'ERROR',
            }
@@ -149,7 +146,7 @@ class SimpleConfig(object):
       r = None
 
       if self.config.has_section('Settings'):
-         if setting in ('hourly_backup_hour', 'weekly_backup_day', 'max_weekly_backups'):
+         if setting in ('hours', 'days', 'weeks'):
             r = self.config.getint('Settings', setting)
          else:
             r = self.config.get('Settings', setting)
@@ -168,15 +165,15 @@ class Account(object):
    def __init__(self, account_name):
       self.base_path = '%s/%s/' % (config.archives_dir, account_name)
 
-   def rotate(self, period_name, next_period_name, max_age):
-      earliest_creation_date = datetime.now() - max_age
-      for backup in self.get_backups_in(period_name):
-         if backup.date < earliest_creation_date:
-            # This backup is too old, move to other backup directory or delete.
-            if next_period_name and backup.is_rotation_time(period_name):
-               backup.move_to(next_period_name, config.archives_dir)
-            else:
-               backup.remove()
+   def rotate(self, period_name, next_period_name, max_count):
+      backups = self.get_backups_in(period_name)
+      while len(backups) > max_count:
+         backup = backups[0]
+         backups.pop(0)
+         if next_period_name:
+            backup.move_to(next_period_name, config.archives_dir)
+         else:
+            backup.remove()
 
    def get_backups_in(self, directory):
       backups = []
@@ -204,26 +201,7 @@ class Backup(object):
       self.account = match_obj.group(1)
       datestring = match_obj.group(3)
       time_struct = time.strptime(datestring, "%Y-%m-%d-%H%M")
-      self.date = datetime(*time_struct[:5])
-
-   def is_rotation_time(self, period_name):
-      assert(period_name in ('hourly', 'daily', 'weekly'))
-
-      if period_name == 'hourly':
-         actual_time = self.date.hour
-         config_time = config.hourly_backup_hour
-      elif period_name == 'daily':
-         actual_time = self.date.weekday
-         config_time = config.weekly_backup_day
-      else:
-         return False
-
-      if actual_time == config_time:
-         LOGGER.debug('%s equals %s.' % (actual_time, config_time))
-         return True
-      else:
-         LOGGER.debug('%s is not %s.' % (actual_time, config_time))
-         return False
+      self.date = datetime(*time_struct[:5])  
 
    def move_to(self, directory, archives_dir):
       destination_dir = os.path.join(archives_dir, self.account, directory);
@@ -307,9 +285,9 @@ config = SimpleConfig()
 check_dirs()
 
 #         period_name, next_period_name, max_age):
-HOURLY = ('hourly',   'daily',           timedelta(hours = 24))
-DAILY  = ('daily',    'weekly',          timedelta(days = 7))
-WEEKLY = ('weekly',   '',                timedelta(days = 7 * config.max_weekly_backups))
+HOURLY = ('hourly',   'daily',           7)
+DAILY  = ('daily',    'weekly',          52)
+WEEKLY = ('weekly',   '',                10)
 
 
 # For each account, rotate out new_arrivals, old dailies, old weeklies.
